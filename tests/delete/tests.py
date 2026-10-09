@@ -4,10 +4,13 @@ from django.db import IntegrityError, connection, models
 from django.db.models.deletion import Collector
 from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
 from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
+from django.test.utils import CaptureQueriesContext
 
 from .models import (
     MR, A, Avatar, Base, Child, HiddenUser, HiddenUserProfile, M, M2MFrom,
-    M2MTo, MRNull, Parent, R, RChild, S, T, User, create_a, get_default_r,
+    M2MTo, MRNull, Origin, Parent, R, RChild, Referrer, S, T, User,
+    SecondReferrer,
+    create_a, get_default_r,
 )
 
 
@@ -436,6 +439,40 @@ class DeletionTests(TestCase):
         # One query for the Avatar table and a second for the User one.
         with self.assertNumQueries(2):
             avatar.delete()
+
+    def test_only_referenced_fields_selected(self):
+        """Only referenced fields are selected during cascade deletion."""
+        origin = Origin.objects.create()
+        referrer = Referrer.objects.create(origin=origin, unique_field=1, large_field='')
+        SecondReferrer.objects.create(referrer=referrer, other_referrer=referrer)
+        with CaptureQueriesContext(connection) as ctx:
+            origin.delete()
+        sql = ctx.captured_queries[0]['sql']
+        self.assertIn(connection.ops.quote_name('unique_field'), sql)
+        self.assertNotIn(connection.ops.quote_name('large_field'), sql)
+
+    def test_only_referenced_fields_selected_with_signals(self):
+        """All fields are selected when deletion signals may access them."""
+        origin = Origin.objects.create()
+        referrer = Referrer.objects.create(origin=origin, unique_field=1, large_field='')
+        SecondReferrer.objects.create(referrer=referrer, other_referrer=referrer)
+
+        def receiver(instance, **kwargs):
+            pass
+
+        for signal_name in ('pre_delete', 'post_delete'):
+            with self.subTest(signal=signal_name):
+                signal = getattr(models.signals, signal_name)
+                signal.connect(receiver, sender=Referrer)
+                try:
+                    with CaptureQueriesContext(connection) as ctx:
+                        origin.delete()
+                    self.assertIn(
+                        connection.ops.quote_name('large_field'),
+                        ctx.captured_queries[0]['sql'],
+                    )
+                finally:
+                    signal.disconnect(receiver, sender=Referrer)
 
 
 class FastDeleteTests(TestCase):
