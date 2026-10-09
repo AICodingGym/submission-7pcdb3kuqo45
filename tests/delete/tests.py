@@ -453,15 +453,16 @@ class DeletionTests(TestCase):
 
     def test_only_referenced_fields_selected_with_signals(self):
         """All fields are selected when deletion signals may access them."""
-        origin = Origin.objects.create()
-        referrer = Referrer.objects.create(origin=origin, unique_field=1, large_field='')
-        SecondReferrer.objects.create(referrer=referrer, other_referrer=referrer)
-
         def receiver(instance, **kwargs):
             pass
 
         for signal_name in ('pre_delete', 'post_delete'):
             with self.subTest(signal=signal_name):
+                origin = Origin.objects.create()
+                referrer = Referrer.objects.create(
+                    origin=origin, unique_field=1, large_field='',
+                )
+                SecondReferrer.objects.create(referrer=referrer, other_referrer=referrer)
                 signal = getattr(models.signals, signal_name)
                 signal.connect(receiver, sender=Referrer)
                 try:
