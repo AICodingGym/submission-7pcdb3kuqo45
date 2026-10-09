@@ -453,6 +453,7 @@ class DeletionTests(TestCase):
 
     def test_only_referenced_fields_selected_with_signals(self):
         """All fields are selected when deletion signals may access them."""
+
         def receiver(instance, **kwargs):
             pass
 
